@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+
+    <title>C++ Coroutines</title>
+
+    <link rel="stylesheet" href="css/reveal.css">
+    <link rel="stylesheet" href="css/theme/league.css">
+    <!--<link rel="stylesheet" href="css/theme/black.css">-->
+    <!-- Code syntax highlighting -->
+    <link rel="stylesheet" href="lib/css/zenburn.css">
+</head>
+
+<body>
+    <div class="reveal">
+        <div class="slides">
+            <section data-markdown>
+                <textarea data-template>
+                    # C++ Coroutines
+                    
+                    Aka Resumable Functions,<br>as currently defined by the [Coroutine TS](http://open-std.org/JTC1/SC22/WG21/docs/papers/2017/n4680.pdf)
+                    
+                    <small>Florian Behrens, 14.06.2018</small>
+                    </textarea>
+            </section>
+
+            <section data-markdown>
+                <textarea data-template>
+                    ## What the heck is a coroutine?
+                    
+                    * Resumable function/subroutine<br>(Melvin Conway, 1958)
+                    * Generalization of a subroutine<br>(Donald Knuth, 1963)
+                    </textarea>
+            </section>
+
+            <section data-markdown>
+                <textarea data-template>
+                    ## What can it be used for?
+                    
+                    * Cooperative tasks
+                    * Exceptions
+                    * Event loops
+                    * Iterators
+                    * Infinite lists
+                    * Pipes
+                    </textarea>
+            </section>
+
+            <section data-markdown>
+                <textarea data-template>
+                    ## What does the [Coroutine TS](http://open-std.org/JTC1/SC22/WG21/docs/papers/2017/n4680.pdf) give us?
+
+                    Three new keywords:<br>
+                    `co_yield`&emsp;&emsp;`co_return`&emsp;&emsp;`co_await`
+
+                    Three new (template) classes:<br>
+                    `std::experimental::coroutine_handle<>`<br>
+                    `std::experimental::coroutine_traits<>`<br>
+                    `std::experimental::suspend_never`<br>
+                    `std::experimental::suspend_always`
+                    </textarea>
+            </section>
+
+            <section>
+                <section>
+                    <h2>How does a coroutine look like?</h2>
+                    <h3>From the viewpoint of the caller:</h3>
+                    <p>As any regular function. Whether or not a subroutine is a coroutine is considered as an implementation
+                        detail.
+                    </p>
+                    <h3>From within the Coroutine:</h3>
+                    <pre><code class="lang-cpp">resumable_type foo(Args...) {
+    ...
+    co_return ...; // or any other coroutine keyword
+};</code></pre>
+                </section>
+
+                <section>
+                    <h2>Example</h2>
+                    <pre><code class="lang-cpp">int answer() {
+    co_yield 41;
+    co_return 42;
+}</code></pre>
+                    <p>
+                        Is that a coroutine?
+                        <br>
+                        <b class="fragment">Yes, it uses coroutine keywords!</b>
+                    </p>
+                    <p class="fragment">
+                        Does it make sense?
+                        <br>
+                        <b class="fragment">No, how could we resume it?</b>
+                    </p>
+                    <p class="fragment">
+                        Does it compile?
+                        <br>
+                        <b class="fragment">No, the compiler needs more information!</b>
+                    </p>
+                </section>
+
+                <section>
+                    <h2>Better Example</h2>
+                    <pre><code class="lang-cpp">resumable_type answer() {
+    co_yield 41;
+    co_return 42;
+}</code></pre>
+                    <p>
+                        Is that a coroutine?
+                        <br>
+                        <b class="fragment">Yes, it uses coroutine keywords!</b>
+                    </p>
+                    <p class="fragment">
+                        Does it make sense?
+                        <br>
+                        <b class="fragment">Well, depends on
+                            <tt>resumable_type</tt>!</b>
+                    </p>
+                    <p class="fragment">
+                        Does it compile?
+                        <br>
+                        <b class="fragment">No, the compiler needs more information!</b>
+                    </p>
+                </section>
+
+                <section>
+                    <h2>What should resumable_type be?</h2>
+                    <pre><code class="lang-cpp">struct resumable_type {
+    int get_value();
+    void resume();
+};</code></pre>
+                    <p class="fragment">
+                        Does it make sense?
+                        <br>
+                        <b class="fragment">Yes, it allows to get the value und resume the coroutine!</b>
+                    </p>
+                    <p class="fragment">
+                        Does it compile?
+                        <br>
+                        <b class="fragment">No, the compiler does not know how to connect this to the coroutine!</b>
+                    </p>
+                </section>
+            </section>
+
+
+            <section>
+                <section>
+                    <h2>Coroutine Traits (1)</h2>
+                    <p>Use coroutine traits to tell the compiler how to deal with a coroutine.</p>
+
+                    <pre><code class="lang-cpp">// Traits class for all coroutines with resumable_type
+// return value and no arguments
+template&lt;>
+struct std::experimental::coroutine_traits&lt;return_type&gt; {
+    struct promise_type { ... };
+};</code></pre>
+                    <p>engl.
+                        <i>traits</i>: Eigenschaft, Merkmal</p>
+                </section>
+
+                <section>
+                    <h2>Coroutine Traits (2)</h2>
+                    <p>If no specialization exists the
+                        <i>primary template</i> is used:</p>
+
+                    <pre><code class="lang-cpp">// File experimental/coroutine
+namespace std { namespace experimental {
+
+template&lt;typename Ret, typename... Args>
+struct coroutine_traits {
+    using promise_type = typename Ret::promise_type;
+};
+
+} }</code></pre>
+                </section>
+            </section>
+
+            <section>
+                <h2>What the heck is this
+                    <tt>promise_type</tt>?</h2>
+
+                <p>
+                    <i>Promise API</i> tells the compiler how to deal with a coro:
+                </p>
+
+                <pre><code class="lang-cpp stretch">struct basic_promise_type {
+    return_type get_return_object();
+    return_type get_return_object_on_allocation_failure(); // opt
+    Awaitable initial_suspend();
+    Awaitable final_suspend();
+    void unhandled_exception();
+    Awaiter await_transform(Awaitable); // optional
+    static void* operator new(std::size_t); // optional
+};
+template&lt;typename T&gt;
+struct promise_type : public basic_promise_type {
+    Awaitable yield_value(T);
+    void return_value(T);
+};
+template&lt;&gt;
+struct promise_type&lt;void&gt; : public basic_promise_type {
+    void return_void();
+};</code></pre>
+            </section>
+
+            <section>
+                <h2>What happens in a coroutine?</h2>
+
+                <pre><code class="lang-cpp">{
+    promise_type p;
+    auto r = p.get_return_object();
+    co_await p.initial_suspend(); // initial suspend point
+
+    try {
+        // Coroutine body
+    } catch(...) {
+        p.unhandled_exception();
+    }
+
+    co_await p.final_suspend(); // final suspend point
+}</code></pre>
+            </section>
+
+            <section>
+                <h2>The co_await statement</h2>
+
+                <pre><code class="lang-cpp">co_await &lt;expr&gt;;</code></pre>
+                <div class="fragment">
+                    <pre><code class="lang-cpp stretch">auto&amp; awaitable = &lt;expr&gt;;
+
+// If promise_type::await_transform() available:
+auto transformed_awaitable = promise.await_transform(awaitable);
+// Else
+auto&amp; transformed_awaitable = awaitable;
+
+// If operator co_await(transformed_awaitable) exists
+auto awaiter = operator co_await(transformed_awaitable);
+// Else
+auto& awaiter = transformed_awaitable;
+
+if (! awaiter.await_ready()) {
+    awaiter.await_suspend(this_coro);
+    // Suspend coroutine
+    awaiter.await_resume();
+}</code></pre>
+                </div>
+            </section>
+
+            <section>
+                <h2>Awaiter API</h2>
+
+                <pre><code class="lang-cpp">struct awaitable {
+    // The coroutine is considered suspended when false.
+    bool await_ready();
+
+    // Called just before coroutine suspension.
+    void await_suspend(std::experimental::coroutine_handle&lt;&gt;);
+    
+    // Called just before coroutine resumption.
+    void await_resume();
+};</code></pre>
+            </section>
+
+            <section>
+                <h2>Coroutine Handle</h2>
+
+                <pre><code class="lang-cpp stretch">namespace std { namespace experimental {
+
+template&lt;typename promise_type>
+struct coroutine_handle {
+    void operator()();
+    void resume();
+    
+    void destroy();
+    
+    operator bool();
+    bool done();   
+
+    promise_type&amp; promise() const;
+    static coroutine_handle from_promise(promise_type&);
+};
+
+} }</code></pre>
+            </section>
+
+            <section>
+                <h2>The co_yield keyword</h2>
+
+                <pre><code class="lang-cpp">co_yield &lt;expr&gt;</code></pre>
+                <div class="fragment">
+                    <p>Is equivalent to:</p>
+                    <pre><code class="lang-cpp">co_await p.yield_value(&lt;expr&gt;);</code></pre>
+                </div>
+            </section>
+
+            <section>
+                <h2>The co_return keyword</h2>
+
+                <pre><code class="lang-cpp">co_return &lt;expr&gt;</code></pre>
+                <div class="fragment">
+                    <p>Is equivalent to:</p>
+                    <pre><code class="lang-cpp">p.return_value(&lt;expr&gt;);
+goto final_suspend;</code></pre>
+                </div>
+            </section>
+
+            <section>
+                <h2>Range based for with co_await</h2>
+
+                <pre><code class="lang-cpp">for co_await (auto e: &lt;initializer&gt;) {
+    // ...
+}</code></pre>
+                <div class="fragment">
+                    <p>Is equivalent to:</p>
+                    <pre><code class="lang-cpp">{
+    auto&amp;&amp; __range = &lt;initializer&gt;;
+    auto __begin = co_await &lt;begin-expr&gt;;
+    auto __end = &lt;end-expr&gt;;
+    for (; __begin != __end; co_await ++__begin) {
+        auto e = *__begin;
+        // ...
+    }
+}</code></pre>
+                </div>
+            </section>
+
+            <section>
+                <h2>Compiler Support</h2>
+                <p>
+                    <ul>
+                        <li>Microsoft Visual C++ (since November 2013 CTP release, then called 'Resumable Functions')</li>
+                        <li>Clang (since version 5.0)</li>
+                    </ul>
+                </p>
+            </section>
+
+            <section data-markdown>
+                <textarea data-template>
+                    ## More Information
+
+                    * [N4680](http://open-std.org/JTC1/SC22/WG21/docs/papers/2017/n4680.pdf): C++ Extensions for Coroutines TS Document
+                    * Good [tutorial](https://kirit.com/How%20C%2B%2B%20coroutines%20work)
+                    * A [library](https://github.com/lewissbaker/cppcoro) of C++ coroutine abstractions
+                    * Gor Nishanov: C++ Coroutines: Under the covers, CppCon 2016 [video](https://www.youtube.com/watch?v=8C8NnE1Dg4A)
+                    * Gor Nishanov: Naked coroutines live (with networking), CppCon 2017 [video](https://www.youtube.com/watch?v=UL3TtTgt3oU)
+                    </textarea>
+            </section>
+
+            <section>
+                <h2>Game Over</h2>
+            </section>
+        </div>
+    </div>
+
+    <script src="lib/js/head.min.js"></script>
+    <script src="js/reveal.js"></script>
+    <script>
+        Reveal.initialize({
+            // Display a presentation progress bar
+            progress: true,
+
+            // Display the page number of the current slide
+            slideNumber: false,
+
+            // Push each slide change to the browser history
+            history: false,
+
+            // Enable keyboard shortcuts for navigation
+            keyboard: true,
+
+            // Enable the slide overview mode
+            overview: true,
+
+            // Vertical centering of slides
+            center: true,
+
+            // Enables touch navigation on devices with touch input
+            touch: true,
+
+            // Transition style
+            transition: 'convex', // none/fade/slide/convex/concave/zoom
+
+            dependencies: [
+                // Syntax highlight for <code> elements
+                { src: 'plugin/highlight/highlight.js', async: true, callback: function () { hljs.initHighlightingOnLoad(); } },
+                { src: 'plugin/markdown/marked.js', condition: function () { return !!document.querySelector('[data-markdown]'); } },
+                { src: 'plugin/markdown/markdown.js', condition: function () { return !!document.querySelector('[data-markdown]'); } }
+            ]
+        });
+    </script>
+</body>
+
+</html>
